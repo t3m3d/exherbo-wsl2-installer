@@ -247,6 +247,14 @@ echo '$h' > /etc/hostname
 ln -sf /usr/share/zoneinfo/$tz /etc/localtime 2>/dev/null || true
 echo '$tz' > /etc/timezone 2>/dev/null || true
 
+# The stage tarball doesn't ship /var/spool/mail, so useradd's auto-
+# mailbox-creation warns "Creating mailbox file: No such file or directory"
+# on stderr (still rc=0). PowerShell wraps every stderr line as a
+# NativeCommandError, which looks like a hard failure. Pre-creating the
+# dir silences the warning at its source.
+mkdir -p /var/spool/mail
+chmod 0775 /var/spool/mail
+
 # Passwords captured interactively on the Windows side (PAM here enforces
 # >=8 chars). The installer validates length + matching on input, so by
 # the time we get here the values are safe to use directly.
