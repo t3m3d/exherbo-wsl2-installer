@@ -82,6 +82,49 @@ if ($existing -and -not $Force) {
     OK "old '$DistroName' unregistered"
 }
 
+# ---- 1b. interactive username + password ----
+# Default username = Windows username lower-cased, but let the user override.
+Write-Host ""
+Say "user setup"
+$usernameInput = Read-Host "Linux username [$Username]"
+if (-not [string]::IsNullOrWhiteSpace($usernameInput)) {
+    $Username = $usernameInput
+}
+# Cheap sanity: must start with a letter, only [a-z0-9_-] allowed, <= 32 chars.
+if ($Username -notmatch '^[a-z][a-z0-9_-]{0,31}$') {
+    Fail "Username '$Username' is invalid (lowercase letter start, then [a-z0-9_-], <=32 chars)"
+}
+
+# Prompt for a password (>= 8 chars; PAM rejects shorter). Same for root.
+function Read-PlaintextPassword([string]$prompt) {
+    while ($true) {
+        $sec1 = Read-Host -Prompt $prompt -AsSecureString
+        $sec2 = Read-Host -Prompt "  re-enter to confirm" -AsSecureString
+        $b1 = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($sec1)
+        $b2 = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($sec2)
+        try {
+            $p1 = [System.Runtime.InteropServices.Marshal]::PtrToStringBSTR($b1)
+            $p2 = [System.Runtime.InteropServices.Marshal]::PtrToStringBSTR($b2)
+        } finally {
+            [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($b1)
+            [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($b2)
+        }
+        if ($p1 -ne $p2) { Warn "passwords don't match; try again"; continue }
+        if ($p1.Length -lt 8) { Warn "password must be at least 8 chars; try again"; continue }
+        if ($p1 -match "[`r`n']") { Warn "password can't contain newlines or single quotes; try again"; continue }
+        return $p1
+    }
+}
+
+$UserPassword = Read-PlaintextPassword "Password for '$Username'"
+$useSamePw = Read-Host "Use the same password for root? (Y/n)"
+if ($useSamePw -eq 'n' -or $useSamePw -eq 'N') {
+    $RootPassword = Read-PlaintextPassword "Password for root"
+} else {
+    $RootPassword = $UserPassword
+}
+OK "credentials captured"
+
 # ---- 2. download stage ----
 Say "preparing dirs"
 New-Item -ItemType Directory -Path $DownloadDir -Force | Out-Null
@@ -153,14 +196,18 @@ Say "writing /etc/wsl.conf, creating user '$Username', cave sync"
 
 # The setup script that runs INSIDE the distro as root.
 # Variables interpolated from PowerShell:
-#   $u  -- username
-#   $h  -- hostname
-#   $tz -- timezone
-#   $m  -- 1 if -EnableMarv was passed, else 0
-$u  = $Username
-$h  = $Hostname
-$tz = $Timezone
-$m  = if ($EnableMarv) { '1' } else { '0' }
+#   $u   -- username
+#   $h   -- hostname
+#   $tz  -- timezone
+#   $m   -- 1 if -EnableMarv was passed, else 0
+#   $rpw -- root password (captured interactively)
+#   $upw -- user password (captured interactively)
+$u   = $Username
+$h   = $Hostname
+$tz  = $Timezone
+$m   = if ($EnableMarv) { '1' } else { '0' }
+$rpw = $RootPassword
+$upw = $UserPassword
 
 $setupScript = @"
 set -e
@@ -200,10 +247,12 @@ echo '$h' > /etc/hostname
 ln -sf /usr/share/zoneinfo/$tz /etc/localtime 2>/dev/null || true
 echo '$tz' > /etc/timezone 2>/dev/null || true
 
-# placeholder passwords (user is expected to change after first login)
-echo 'root:exherbo' | chpasswd
+# Passwords captured interactively on the Windows side (PAM here enforces
+# >=8 chars). The installer validates length + matching on input, so by
+# the time we get here the values are safe to use directly.
+echo 'root:$rpw' | chpasswd
 useradd -m -G wheel,users -s /bin/bash $u
-echo '${u}:${u}' | chpasswd
+echo "${u}:$upw" | chpasswd
 
 # enable wheel sudo (sudoers exists post-stage)
 [ -f /etc/sudoers ] && sed -i 's/^# %wheel ALL=(ALL:ALL) ALL/%wheel ALL=(ALL:ALL) ALL/' /etc/sudoers
@@ -260,8 +309,8 @@ Write-Host "  Exherbo installed and ready"             -ForegroundColor Green
 Write-Host "=========================================" -ForegroundColor Green
 Write-Host "  Distro:    $DistroName"
 Write-Host "  Path:      $InstallPath"
-Write-Host "  User:      $u (password: $u)"
-Write-Host "  Root:      password 'exherbo'"
+Write-Host "  User:      $Username (password you set during install)"
+Write-Host "  Root:      password you set during install"
 Write-Host "  Hostname:  $h"
 Write-Host ""
 Write-Host "  CHANGE THOSE PLACEHOLDER PASSWORDS:" -ForegroundColor Yellow
