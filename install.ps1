@@ -93,20 +93,6 @@ if ((Get-ChildItem $InstallPath -Force -ErrorAction SilentlyContinue).Count -gt 
 $stageFile = Join-Path $DownloadDir 'exherbo-stage.tar.xz'
 $hashFile  = "$stageFile.sha256"
 
-Say "downloading stage tarball (~560 MB)"
-$sw = [System.Diagnostics.Stopwatch]::StartNew()
-Invoke-WebRequest -Uri $StageUrl -OutFile $stageFile -UseBasicParsing
-$sw.Stop()
-$mb = [math]::Round((Get-Item $stageFile).Length / 1MB, 1)
-OK "downloaded $mb MB in $([math]::Round($sw.Elapsed.TotalSeconds,1))s"
-
-Say "downloading hash file"
-Invoke-WebRequest -Uri "$StageUrl.sha256sum" -OutFile $hashFile -UseBasicParsing
-OK "got hash file"
-
-Say "verifying sha256"
-$claimed = (Get-Content $hashFile -Raw).Trim().Split()[0]
-
 function Get-Sha256Hex([string]$path) {
     $sha = [System.Security.Cryptography.SHA256]::Create()
     try {
@@ -117,6 +103,37 @@ function Get-Sha256Hex([string]$path) {
     } finally { $sha.Dispose() }
     return ([System.BitConverter]::ToString($bytes) -replace '-','').ToLower()
 }
+
+# Always fetch the current upstream hash so we can validate a cached tarball.
+Say "downloading hash file"
+Invoke-WebRequest -Uri "$StageUrl.sha256sum" -OutFile $hashFile -UseBasicParsing
+$claimed = (Get-Content $hashFile -Raw).Trim().Split()[0]
+OK "got hash file ($claimed)"
+
+# Reuse a cached tarball iff it hashes to the upstream value. Otherwise re-download.
+$needDownload = $true
+if (Test-Path $stageFile) {
+    Say "checking cached tarball at $stageFile"
+    $cachedHash = Get-Sha256Hex $stageFile
+    if ($cachedHash -eq $claimed.ToLower()) {
+        $mb = [math]::Round((Get-Item $stageFile).Length / 1MB, 1)
+        OK "cached tarball matches upstream hash ($mb MB) -- skipping download"
+        $needDownload = $false
+    } else {
+        Warn "cached tarball hash mismatch -- redownloading"
+    }
+}
+
+if ($needDownload) {
+    Say "downloading stage tarball (~560 MB)"
+    $sw = [System.Diagnostics.Stopwatch]::StartNew()
+    Invoke-WebRequest -Uri $StageUrl -OutFile $stageFile -UseBasicParsing
+    $sw.Stop()
+    $mb = [math]::Round((Get-Item $stageFile).Length / 1MB, 1)
+    OK "downloaded $mb MB in $([math]::Round($sw.Elapsed.TotalSeconds,1))s"
+}
+
+Say "verifying sha256"
 $actual = Get-Sha256Hex $stageFile
 if ($claimed.ToLower() -ne $actual) {
     Fail "SHA256 MISMATCH. Expected $claimed, got $actual. Delete $stageFile and retry."
