@@ -142,11 +142,11 @@ OK "sha256 verified ($actual)"
 
 # ---- 3. wsl import ----
 Say "wsl --import $DistroName"
-$sw.Restart()
+$swImport = [System.Diagnostics.Stopwatch]::StartNew()
 & $WSL --import $DistroName $InstallPath $stageFile --version 2 2>&1 | Out-Null
 if ($LASTEXITCODE -ne 0) { Fail "wsl --import failed (rc=$LASTEXITCODE)" }
-$sw.Stop()
-OK "imported in $([math]::Round($sw.Elapsed.TotalSeconds,1))s"
+$swImport.Stop()
+OK "imported in $([math]::Round($swImport.Elapsed.TotalSeconds,1))s"
 
 # ---- 4. first-boot setup inside the distro ----
 Say "writing /etc/wsl.conf, creating user '$Username', cave sync"
