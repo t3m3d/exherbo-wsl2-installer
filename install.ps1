@@ -161,12 +161,21 @@ generateHosts=true
 generateResolvConf=true
 
 [interop]
+# enabled=true keeps explorer.exe / code.exe / etc. callable when you
+# explicitly want to cross over to Windows.
 enabled=true
+# but appendWindowsPath=false stops Windows PATH from being unionised
+# into the Linux PATH -- so `kcc` resolves to the Linux install, never
+# to C:\Users\...\kcc.exe.
 appendWindowsPath=false
 
 [automount]
 enabled=true
-options="metadata,umask=22,fmask=11"
+# noexec on /mnt/c blocks executing Windows binaries from inside WSL even
+# if you call them by full path -- prevents accidentally running a stray
+# Windows kcc.exe / etc.exe when you meant the Linux native version.
+# Read + list still work, so cd /mnt/c/... is fine for inspection.
+options="metadata,umask=22,fmask=11,noexec"
 EOF
 
 # hostname + timezone
