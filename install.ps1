@@ -223,7 +223,11 @@ echo "--- setup done ---"
 "@
 
 $tmpScript = Join-Path $env:TEMP "exherbo-setup-$([Guid]::NewGuid().ToString('N').Substring(0,8)).sh"
-# Set-Content -Encoding UTF8 in PS 5.1 prepends a BOM, which bash sees as
+# Set-Content -Encoding UTF8 in PS 5.1 prepends a BOM which bash chokes on,
+# and the PowerShell here-string uses Windows CRLF line endings which bash
+# also chokes on (sees `set -e\r` -> `-e\r` as an invalid flag). Normalise
+# both before writing.
+$setupScript = $setupScript -replace "`r`n", "`n"
 [System.IO.File]::WriteAllText($tmpScript, $setupScript, [System.Text.UTF8Encoding]::new($false))
 
 # Convert Windows path -> WSL path via the distro's wslpath
